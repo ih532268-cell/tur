@@ -9,6 +9,10 @@ on:
       tag:
         description: "Release tag, e.g. chisel-1.12.0"
         required: true
+      binary:
+        description: "Name of the executable to inspect inside the debs (e.g. chisel, tspin)"
+        required: true
+        default: "chisel"
 
 permissions:
   contents: write
@@ -30,11 +34,13 @@ jobs:
           ls -l out
 
       - name: Inspect binaries
+        env:
+          BIN: ${{ inputs.binary }}
         run: |
           for d in out/*.deb; do
             a=$(basename "$d" .deb)
             mkdir -p "x/$a"; dpkg-deb -x "$d" "x/$a"
-            b=$(find "x/$a" -type f -name chisel | head -1)
+            b=$(find "x/$a" -type f -name "$BIN" | head -1)
             info="$(file -b "$b" | cut -c1-150)%0A$(readelf -l "$b" 2>/dev/null | grep -i interpreter | sed 's/^ *//')%0ANEEDED: $(readelf -d "$b" 2>/dev/null | grep NEEDED | sed 's/.*\[\(.*\)\]/\1/' | tr '\n' ' ')%0Apath: ${b#x/$a}%0Adeb: $(dpkg-deb -f "$d" Package Version Architecture Depends | tr '\n' ' ')"
             echo "::notice title=$a::$info"
           done
