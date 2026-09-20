@@ -1,0 +1,50 @@
+name: Publish debs
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Packages-TUR run id whose .deb artifacts to publish"
+        required: true
+      tag:
+        description: "Release tag, e.g. chisel-1.12.0"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and unpack deb artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          mkdir -p dl out
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" --pattern 'debs-*' -D dl
+          for t in $(find dl -name '*.tar'); do tar xf "$t" -C dl; done
+          find dl -name '*.deb' -exec cp -v {} out/ \;
+          ls -l out
+
+      - name: Inspect binaries
+        run: |
+          for d in out/*.deb; do
+            a=$(basename "$d" .deb)
+            mkdir -p "x/$a"; dpkg-deb -x "$d" "x/$a"
+            b=$(find "x/$a" -type f -name chisel | head -1)
+            info="$(file -b "$b" | cut -c1-150)%0A$(readelf -l "$b" 2>/dev/null | grep -i interpreter | sed 's/^ *//')%0ANEEDED: $(readelf -d "$b" 2>/dev/null | grep NEEDED | sed 's/.*\[\(.*\)\]/\1/' | tr '\n' ' ')%0Apath: ${b#x/$a}%0Adeb: $(dpkg-deb -f "$d" Package Version Architecture Depends | tr '\n' ' ')"
+            echo "::notice title=$a::$info"
+          done
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          gh release create "$TAG" out/*.deb -R "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes "Termux .deb builds from TUR CI (workflow run $RUN_ID). Install: pkg install ./<file>.deb"
